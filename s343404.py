@@ -93,7 +93,7 @@ def solution(p:Problem):
         table = updateNavTable(table, robbedCities)
         robbedCities.clear()
 
-    return path
+    return path, cost
 
 
 def createNavTable(g: nx.Graph):
