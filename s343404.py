@@ -3,10 +3,6 @@ import numpy as np
 import networkx as nx
 
 def solution(p:Problem):
-    p=Problem()
-    # TODO: implement your solution here
-    # In the enf of the code for your solution, make sure that the path has the format [(c1, g1), (c2, g2), …, (cN, gN), (0, 0)]
-
     #Policy: search for the farthest city, reach it without stealing and get back stealing at each city. If near the base there are other cities next to the base go there too. While backtracking if there are multiple paths not next to
     # the base don't steal and go back 
 
@@ -16,44 +12,84 @@ def solution(p:Problem):
             -next, next hop needed to get to the base node
             -numHops, number of hops needed to get there
             -distance, actual distance to get to a specific city
-        -partialRoute, resetted every time the base is reached. Needed for backtracking and updating the table. Contains all nodes visited per run
+        -robbedCities, resetted every time the base is reached. Needed for updating the table. Contains all nodes robbed per run
         -state, which is the tuple containing:
             -current: current position
             -gold: gold stolen
-            -returning: 1/0 or bool, 0/false if trying to get to the target, 1/true if trying to get back
-            -objective: target node to reach
-        -totalGold
-        -stolenGold
     """
+    cost = 0
+    path = []
     table = createNavTable(p._graph)
-    stolenGold = 0
-    totalGold = 0
-    partialRoute = []
-    state = (0, 0, 0, 0)
-    """
-    Step 2: Loop started, starting policy from base:
-        -check the table and look for the city with the highest ammount of hops needed (basically take the last of the table)
-        -reach the city without stealing any gold ("teleport" there and calculate the cost returning back using the "next" of the table)
-        at arrival state "returning" = 1
-    Loop ends when stolenGold == total gold
-    """
+    robbedCities = set
+    state = {"current": 0, "gold": 0}
 
-    """
-    Step 3: Return started, returning policy:
-        -steal target gold
-        -backtrack with following policy at each nodes:
-            -if pathes - robbedNearbyCities (cities with 0 gold or not the base) == 1 steal and backtrack (only backtrack is possible)
-            -else if base is near and a nearby node is near to the base (so both linked to base and with each other) steal and go to that city
-            -else don't steal and backtrack (another future path is present, will steal in the future)
-    """
+    while table.__len__ != 0:
+        """
+        Step 2: Loop started, starting policy from base:
+            -check the table and look for the city with the highest ammount of hops needed (basically take the last of the table)
+            -reach the city without stealing any gold ("teleport" there and calculate the cost returning back using the "next" of the table)
+            -steal target gold
+        Loop ends when all nodes are visited
+        """
 
-    """
-    Step 4: Return, update NavTable:
-        -scroll through the table, if the target is in the path of the stolen cities remove them
-        example: in this run 2, 3 and 4 have been robbed -> remove the rows which have cities 2, 3 and 4 as target from the NavTable
-    """
+        state["current"] = table[table.__len__-1][0]
+        returnPath = updatePath(table, state["current"], path)
+        
+        cost+= table[table.__len__-1][3]
+        state["gold"] += p._graph.nodes[state["current"]]['gold']
+        p._graph.nodes[state["current"]]['gold'] = 0
+        robbedCities.add(state["current"]) 
+        state["current"] = table[table.__len__-1][1]
 
-    path = [(1, 75), (0, 0)]
+        while state["current"] != 0:
+            robbedCities.add(state["current"])
+            """
+            Step 3: Return started, returning policy:
+                -backtrack with following policy at each nodes:
+                    -if pathes - robbedNearbyCities (cities with 0 gold and not the base) == 1 steal and backtrack (only backtrack is "possible")
+                    -else if base is near and a nearby node is near to the base (so both linked to base and with each other) steal and go to that city
+                    -else don't steal and backtrack (another future path is present, will steal in the future)
+            """
+            robbedNearbyCities = [x for x in p._graph.neighbors(state["current"]) if x != 0 & p._graph.nodes[x]['gold'] == 0].__len__
+            possiblePaths = p._graph.neighbors(state["current"]) - robbedNearbyCities
+
+
+            next = returnPath[returnPath.__len__-1][0]
+            returnPath.pop
+            
+            
+            if possiblePaths == 1:
+                state["gold"] += p._graph.nodes[state["current"]]['gold']
+                path.append((state["current"], p._graph.nodes[state["current"]]['gold']))
+                p._graph.nodes[state["current"]]['gold'] = 0
+                robbedCities.add(state["current"])
+                cost = p.cost([state["current"], next], cost)
+                state["current"] = next
+                continue
+            if next == 0 & possiblePaths > 1:
+                for x in p._graph.neighbors(state["current"]):
+                    if 0 in p._graph.neighbors(x):
+                        state["gold"] += p._graph.nodes[state["current"]]['gold']
+                        path.append((state["current"], p._graph.nodes[state["current"]]['gold']))
+                        p._graph.nodes[state["current"]]['gold'] = 0
+                        robbedCities.add(state["current"])
+                        cost = p.cost([state["current"], next], cost)
+                        state["current"] = next
+                        continue
+            
+            path.append((state["current"], 0))
+            cost = p.cost([state["current"], next], cost)
+            state["current"] = next
+            
+        """
+        Step 4: Return, update NavTable:
+            -scroll through the table, if the target is in the path of the stolen cities remove them
+            example: in this run 2, 3 and 4 have been robbed -> remove the rows which have cities 2, 3 and 4 as target from the NavTable
+        """
+        
+        updateNavTable(table, robbedCities)
+        robbedCities.clear
+
     return path
 
 
@@ -93,6 +129,19 @@ def createNavTable(g: nx.Graph):
     """
     Updates the table removing all Navigation routes to cities already robbed
     """
-def updateNaveTable(table: list[tuple[int, int, int]], robbedCities: set[int]):
+def updateNavTable(table: list[tuple[int, int, int]], robbedCities: set[int]):
     return [row for row in table if row[0] not in robbedCities]
 
+        
+def updatePath(table: list[tuple[int, int, int]], current, path: list[tuple[int, int]]):
+    c = current
+    revPath = []
+    for i in range (table.len-1, 0):
+        if table[i][0] == c:
+            revPath.append(c, 0)
+            c = table[i][1]
+            if c == 0:
+                break
+    path.append(revPath.reverse)
+    return revPath
+    
