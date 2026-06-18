@@ -1,150 +1,234 @@
-from Problem import Problem
-import numpy as np
 import networkx as nx
+import numpy as np
+from Problem import Problem
+from scipy.sparse.csgraph import shortest_path
 
-def solution(p:Problem):
-    #Policy: search for the farthest city, reach it without stealing and get back stealing at each city. If near the base there are other cities nextHop to the base go there too. While backtracking if there are multiple paths not nextHop to
-    # the base don't steal and go back 
+def costCounter(P: Problem, path):
+    gold_Kept = 0
+    cost = P.cost((0, path[0][0]), 0)
+    for i in range(0, len(path)-1):
+        gold_Kept += path[i][1]
+        cost += P.cost((path[i][0], path[i+1][0]), gold_Kept)
+        if(path[i+1][0] == 0):
+            gold_Kept = 0
+    return cost
 
-    """Step 1: calculate the navigation structure. The structures to calculate are: 
-        -Table, ordered by the number of hops which contains:
-            -target, target node
-            -nextHop, nextHop hop needed to get to the base node
-            -numHops, number of hops needed to get there
-            -distance, actual distance to get to a specific city
-        -robbedCities, resetted every time the base is reached. Needed for updating the table. Contains all nodes robbed per run
-        -state, which is the tuple containing:
-            -current: current position
-            -gold: gold stolen
-    """
-    cost = 0
+
+def verify_all_robbed(p: Problem, path):
+    graph = p.graph
+    
+    
+    expected_gold = {n: graph.nodes[n]['gold'] for n in graph.nodes if n != 0 and graph.nodes[n]['gold'] > 0}
+    
+    robbed_cities = {}
+    
+    for step in path:
+        node, gold_collected = step
+        
+        if gold_collected > 0:
+            if node in robbed_cities:
+                print(f"City {node} has been robbed multiple times!.")
+                return False
+            robbed_cities[node] = gold_collected
+            
+    # Verifica città mancanti
+    missing_cities = set(expected_gold.keys()) - set(robbed_cities.keys())
+    if missing_cities:
+        print(f"The following cities have not been robbed: {missing_cities}")
+        return False
+        
+    # Verifica città inesistenti o senza oro
+    extra_cities = set(robbed_cities.keys()) - set(expected_gold.keys())
+    if extra_cities:
+        print(f"ERRORE: Sono state derubate città che non possedevano oro o nodo 0: {extra_cities}")
+        return False
+        
+    
+    for node in expected_gold:
+        if not np.isclose(expected_gold[node], robbed_cities[node]):
+            print(f"Gold discrepancy in node {node}. "
+                  f"Expected: {expected_gold[node]}, Got: {robbed_cities[node]}")
+            return False
+            
+    print("Validation passed")
+    return True
+
+def reconstruct_path(predecessors, start, end):
+    """Reconstructs the minimal path from the predecessor matrix."""
+    if start == end:
+        return [int(start)]
+    
     path = []
-    table = createNavTable(p.graph)
-    robbedCities = set()
-    state = {"current": 0, "gold": 0}
-    graph = p.graph.copy()
-
-    while len(table) != 0:
-        """
-        Step 2: Loop started (ends when all nodes are visited, ergo table is empty), starting policy from base:
-            -"deposit" gold owned at the base
-            -check the table and look for the city with the highest ammount of hops needed (basically take the last of the table)
-            -reach the city without stealing any gold, 
-            -steal target gold
-        """
-        
-        state["gold"] = 0
-
-        state["current"] = table[len(table)-1][0]
-        
-        returnPath = updatePath(table, state["current"], path)
-        cost+= table[len(table)-1][3]
-        state["gold"] += graph.nodes[state["current"]]['gold']
-        graph.nodes[state["current"]]['gold'] = 0
-
-        state["current"] = table[len(table)-1][1]
-
-        while state["current"] != 0:
-            robbedCities.add(state["current"])
-            """
-            Step 3: Return started, returning policy:
-                -backtrack with following policy at each nodes:
-                    -if pathes - robbedNearbyCities (cities with 0 gold and not the base) == 1 steal and backtrack (only backtrack is "possible")
-                    -else if base is near and a nearby node is near to the base (so both linked to base and with each other) steal and go to that city
-                    -else don't steal and backtrack (another future path is present, will steal in the future)
-            """
-            robbedNearbyCities = [x for x in graph.neighbors(state["current"]) if x != 0 and graph.nodes[x]['gold'] == 0].__len__()
-            possiblePaths = len(graph.neighbors(state["current"])) - robbedNearbyCities
-
-
-            nextHop = returnPath[len(returnPath)-1][0]
-            returnPath.pop()
+    curr = end
+    while curr != start:
+        path.append(int(curr))
+        curr = predecessors[start, curr]
+        if curr == -9999:  # No path available
+            return []
             
-            
-            if possiblePaths == 1:
-                state["gold"] += graph.nodes[state["current"]]['gold']
-                path.append((state["current"], graph.nodes[state["current"]]['gold']))
-                graph.nodes[state["current"]]['gold'] = 0
-                robbedCities.add(state["current"])
-                cost = p.cost([state["current"], nextHop], cost)
-                state["current"] = nextHop
-                continue
-            if nextHop == 0 and possiblePaths > 1:
-                for x in graph.neighbors(state["current"]):
-                    if 0 in graph.neighbors(x):
-                        state["gold"] += graph.nodes[state["current"]]['gold']
-                        path.append((state["current"], graph.nodes[state["current"]]['gold']))
-                        graph.nodes[state["current"]]['gold'] = 0
-                        robbedCities.add(state["current"])
-                        cost = p.cost([state["current"], nextHop], cost)
-                        state["current"] = nextHop
-                        continue
-            
-            path.append((state["current"], 0))
-            cost = p.cost([state["current"], nextHop], cost)
-            state["current"] = nextHop
-            
-        """
-        Step 4: Return, update NavTable:
-            -scroll through the table, if the target is in the path of the stolen cities remove them
-            example: in this run 2, 3 and 4 have been robbed -> remove the rows which have cities 2, 3 and 4 as target from the NavTable
-        """
-        
-        table = updateNavTable(table, robbedCities)
-        robbedCities.clear()
+    path.append(int(start))
+    return path[::-1]
 
-    return path, cost
-
-
-def createNavTable(g: nx.Graph):
-    table = []
-    usedNodes = np.zeros(g.number_of_nodes)
-
-    """
-    Step 1.1: Table init. From the base node get the list of nodes linked to it. For each node add it to the table with hops of the node equal to 1 and the distance from the base
-    """
-    usedNodes[0] = 1
-    for x in g.neighbors(0):
-        table.append((x, 0, 1, nx.path_weight(g, [0, x], weight='dist')))
-        usedNodes[x] = 1 
-
-    """
-    Step 1.2: Loop start. The following steps are:
-        -from a node get the list of nodes linked to it. For each node:
-            -if it is already used just skip it (for now, might be a point to optimize distance)
-            -if the node is not used add it to the table with hops of the node (hops of the current row + 1)
-    """
+def solution(p: Problem, getCostNotPath = False):
+    graph = p.graph
     
-    #value that indicates the last row used
-    rowEval = 0
-    while(sum(usedNodes) != g.number_of_nodes):
-        (node, _, numHops, distance) = table[rowEval]
-        rowEval += 1
-        for x in g.neighbors(node):
-            if usedNodes[x]:
-                continue
-            table.append((x, node, numHops+1, distance + nx.path_weight(g, [node, x], weight='dist')))
-            usedNodes[x] = 1 
+    # Objectives identification
+    nodes_gold = {n: graph.nodes[n]['gold'] for n in graph.nodes if n != 0 and graph.nodes[n]['gold'] > 0}
+    if not nodes_gold:
+        return [(0, 0)]
 
-    return table
+    gold_nodes = list(nodes_gold.keys())
 
-
-    """
-    Updates the table removing all Navigation routes to cities already robbed
-    """
-def updateNavTable(table: list[tuple[int, int, int]], robbedCities: set[int]):
-    return [row for row in table if row[0] not in robbedCities]
-
-        
-def updatePath(table: list[tuple[int, int, int]], current, path: list[tuple[int, int]]):
-    c = current
-    revPath = []
-    for i in range (len(table)-1, -1, -1):
-        if table[i][0] == c:
-            revPath.append((c, 0))
-            c = table[i][1]
-            if c == 0:
-                break
-    path.append(list(reversed(revPath)))
-    return revPath
+    # Conversion of the graph into a distance matrix
+    adj_matrix = nx.to_scipy_sparse_array(graph, weight='dist')
     
+
+    dist_matrix, predecessors = shortest_path(adj_matrix, method='auto', directed=False, return_predecessors=True)
+
+    all_distances = []
+    for i in range(len(gold_nodes)):
+        for j in range(i + 1, len(gold_nodes)):
+            all_distances.append(dist_matrix[gold_nodes[i], gold_nodes[j]])
+    
+    # Spatial tollerance treshold
+    if all_distances:
+        distance_threshold = np.percentile(all_distances, 10) 
+    else:
+        distance_threshold = float('inf')
+
+    def evaluate_route(targets):
+        route = []
+        start_node = int(targets[0])
+        
+        # Reaching the target without taking gold
+        path_out = reconstruct_path(predecessors, 0, start_node)
+        for step in path_out[1:]:
+            if step == start_node:
+                route.append((step, nodes_gold[step]))
+            else:
+                route.append((step, 0))
+                
+        # Intermediate gold stealing
+        curr = start_node
+        for nxt in targets[1:]:
+            path_between = reconstruct_path(predecessors, curr, nxt)
+            for step in path_between[1:]:
+                if step == nxt:
+                    route.append((step, nodes_gold[step]))
+                else:
+                    route.append((step, 0))
+            curr = nxt
+            
+        # Unloading
+        path_home = reconstruct_path(predecessors, curr, 0)
+        for step in path_home[1:]:
+            route.append((step, 0))
+            
+        # Cost calculation
+        c = p.cost((0, route[0][0]), 0)
+        gold_k = 0
+        for i in range(len(route)-1):
+            gold_k += route[i][1]
+            c += p.cost((route[i][0], route[i+1][0]), gold_k)
+            if route[i+1][0] == 0:
+                gold_k = 0
+                
+        return c, route
+
+    targets_list = [[n] for n in gold_nodes]
+    routes_info = {tuple(t): evaluate_route(t) for t in targets_list}
+    
+    max_iterations = len(gold_nodes) * 5 
+    iteration = 0
+    
+    while iteration < max_iterations:
+        iteration += 1
+        n_routes = len(targets_list)
+        
+        if n_routes < 2:
+            break
+
+        best_saving = 0
+        best_merge_idx = None
+        best_merge_targets = None
+        best_merge_info = None
+
+        for i in range(n_routes):
+            for j in range(i + 1, n_routes):
+                r1 = targets_list[i]
+                r2 = targets_list[j]
+                
+                
+                dist_A = dist_matrix[r1[-1], r2[0]] 
+                dist_B = dist_matrix[r2[-1], r1[0]] 
+                
+                # Pruning
+                if dist_A > distance_threshold and dist_B > distance_threshold:
+                    continue 
+                
+                cost_separate = routes_info[tuple(r1)][0] + routes_info[tuple(r2)][0]
+                
+                saving_A = -1
+                if dist_A <= distance_threshold:
+                    merged_A = r1 + r2
+                    cost_A, route_A = evaluate_route(merged_A)
+                    saving_A = cost_separate - cost_A
+                
+                saving_B = -1
+                if dist_B <= distance_threshold:
+                    merged_B = r2 + r1
+                    cost_B, route_B = evaluate_route(merged_B)
+                    saving_B = cost_separate - cost_B
+                
+                if saving_A > best_saving and saving_A >= saving_B:
+                    best_saving = saving_A
+                    best_merge_idx = (i, j)
+                    best_merge_targets = merged_A
+                    best_merge_info = (cost_A, route_A)
+                elif saving_B > best_saving and saving_B > saving_A:
+                    best_saving = saving_B
+                    best_merge_idx = (i, j)
+                    best_merge_targets = merged_B
+                    best_merge_info = (cost_B, route_B)
+                
+        if best_saving > 1e-6:
+            i, j = best_merge_idx
+            idx_max, idx_min = max(i, j), min(i, j)
+            
+            r_max_tuple = tuple(targets_list.pop(idx_max))
+            r_min_tuple = tuple(targets_list.pop(idx_min))
+            del routes_info[r_max_tuple]
+            del routes_info[r_min_tuple]
+            
+            targets_list.append(best_merge_targets)
+            routes_info[tuple(best_merge_targets)] = best_merge_info
+        else:
+            break
+
+    # Reconstruction of the final path
+    best_overall_path = []
+    for t in targets_list:
+        best_overall_path.extend(routes_info[tuple(t)][1])
+        
+    final_optimal_path = []
+    for step in best_overall_path:
+        if step == (0, 0):
+            if not final_optimal_path or final_optimal_path[-1] != (0, 0):
+                final_optimal_path.append(step)
+        else:
+            final_optimal_path.append(step)
+            
+    if not final_optimal_path or final_optimal_path[-1] != (0, 0):
+        final_optimal_path.append((0, 0))
+    #for testing in the problem jupyter file.
+    if(getCostNotPath):
+        return costCounter(p, final_optimal_path)
+    print("Optimal cost found: ", costCounter(p, final_optimal_path))
+    return final_optimal_path
+
+    
+
+if __name__ == "__main__":
+    P = Problem(500, density=0.5, alpha=1, beta=1)
+    print("Baseline: ", P.baseline())
+    print("Is everything oke?", verify_all_robbed(P, solution(P)))
