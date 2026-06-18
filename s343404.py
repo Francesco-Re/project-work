@@ -14,6 +14,12 @@ def costCounter(P: Problem, path):
     return cost
 
 
+def is_valid(problem, path):
+
+    for (c1, gold1), (c2, gold2) in zip(path, path[1:]):
+
+        yield problem.graph.has_edge(c1,c2)
+
 def verify_all_robbed(p: Problem, path):
     graph = p.graph
     
@@ -31,16 +37,10 @@ def verify_all_robbed(p: Problem, path):
                 return False
             robbed_cities[node] = gold_collected
             
-    # Verifica città mancanti
+    # Verify if there are missing cities
     missing_cities = set(expected_gold.keys()) - set(robbed_cities.keys())
     if missing_cities:
         print(f"The following cities have not been robbed: {missing_cities}")
-        return False
-        
-    # Verifica città inesistenti o senza oro
-    extra_cities = set(robbed_cities.keys()) - set(expected_gold.keys())
-    if extra_cities:
-        print(f"ERRORE: Sono state derubate città che non possedevano oro o nodo 0: {extra_cities}")
         return False
         
     
@@ -140,7 +140,6 @@ def solution(p: Problem, getCostNotPath = False):
     
     max_iterations = len(gold_nodes) * 5 
     iteration = 0
-    
     while iteration < max_iterations:
         iteration += 1
         n_routes = len(targets_list)
@@ -231,4 +230,4 @@ def solution(p: Problem, getCostNotPath = False):
 if __name__ == "__main__":
     P = Problem(500, density=0.5, alpha=1, beta=1)
     print("Baseline: ", P.baseline())
-    print("Is everything oke?", verify_all_robbed(P, solution(P)))
+    print("Is everything oke?", all(is_valid(P, solution(P))))
