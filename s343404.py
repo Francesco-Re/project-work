@@ -228,6 +228,6 @@ def solution(p: Problem, getCostNotPath = False):
     
 
 if __name__ == "__main__":
-    P = Problem(500, density=0.5, alpha=1, beta=1)
+    P = Problem(500, density=1, alpha=1, beta=2)
     print("Baseline: ", P.baseline())
     print("Is everything oke?", all(is_valid(P, solution(P))))
